@@ -1,7 +1,7 @@
 """
-Parse a proteome FASTA file from the Ensembl database and return which
-genes have multiple splice variants. Count number of splice variants.
-Map phosphosites to parsed proteome.
+Parse an Ensembl proteome FASTA file and return which genes have 
+multiple splice variants. Count the number of splice variants. Map 
+phosphosites from tissue data to a parsed proteome.
 
 per.warholm@scilifelab.se
 2014-07-29
@@ -9,7 +9,8 @@ per.warholm@scilifelab.se
 
 from Bio import SeqIO
 import numpy as np
-import re, sys
+import re, glob
+import sys, os
 
 class AutoVivification(dict):
     """Implementation of perl's autovivification feature."""
@@ -67,8 +68,10 @@ def map_phosposites(tissues, proteome, translation):
     """Map detected phosphosites from tissue data to a reference
     proteome."""
 
-    ## parse tissue file
+    phosphosites = AutoVivification()
+    ## parse tissue files
     for tissue in tissues:
+        tissue_name = os.path.basename(tissue).split('-')[0]
         with open(tissue, 'r') as fh_tissue:
             for line in fh_tissue:
                 if not line.strip():
@@ -88,15 +91,38 @@ def map_phosposites(tissues, proteome, translation):
                         if re.sub(r'\[.*?\]', '', peptide) in sequence:
                             hits[idx]+=1
                 
-                ## output fraction of peptides that are found in each splice variant
-                # print protein_name, [float(i)/n for i in hits]
-                print protein_name, hits, n
+                ## output to stdout
+                # print protein_name, hits, n
+                
+                ## save result in dictionary
+                phosphosites[tissue_name][protein_name] = [float(i)/n for i in hits]
+
+    return phosphosites
+
+def determine_tissue_specificity(phosphosites):
+    """Determine which phosphorylation sites are tissue specific."""
+    
+    tissue_specificity = {}
+    for tissue, proteins in phosphosites.iteritems():
+        for protein, expressed_phosphosites in proteins.iteritems():
+            ## check if expressed protein is available in other tissues
+            tissue_specific = True
+            for query in phosphosites.iterkeys():
+                if query == tissue:
+                    continue
+                elif protein in phosphosites[query]:
+                    tissue_specific = False
+            tissue_specificity[protein] = tissue_specific
+    return tissue_specificity
+
 
 ## main pipeline
 fn_fasta = '../data/mouse/Mus_musculus.GRCm38.75.pep.all.fa'
-fn_tissues = ['../data/mouse/tissues/brain-identified-proteins.txt']
+# fn_tissues = ['../data/mouse/tissues/brain-identified-proteins.txt']
+fn_tissues = sorted(glob.glob('../data/mouse/tissues/*-identified-proteins.txt'))
 
 mouse_proteome, translation_table = parse_proteome(fn_fasta)
 # count_splice_variants(mouse_proteome)
 # count_splice_variants_average(mouse_proteome)
-map_phosposites(fn_tissues, mouse_proteome, translation_table)
+phosphosites = map_phosposites(fn_tissues, mouse_proteome, translation_table)
+tissue_specificity = determine_tissue_specificity(phosphosites)
